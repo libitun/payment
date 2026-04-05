@@ -8,7 +8,7 @@
 
 ---
 
-## [Live Demo](https://payment-two-sable.vercel.app/) · [Demo Video](https://youtu.be/example) · [Docs](https://github.com/libitun/payment/blob/main/README.md) · [Solana Explorer](https://solscan.io/account/5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN?cluster=devnet)
+## [Live Demo](https://payment-z9.vercel.app/) · [Demo Video](https://youtu.be/example) · [Docs](https://github.com/libitun/payment/blob/main/README.md) · [Solana Explorer](https://solscan.io/account/5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN?cluster=devnet)
 
 ## 🚀 Key Features
 
@@ -18,6 +18,17 @@
 - **On-Chain Registry** — Every property is verified and stored in a decentralized Registry PDA for ultimate transparency.
 - **Yield Boost Mechanics** — Lock your real estate tokens for fixed terms to earn higher annual yields.
 - **Success Banners** — Real-time transaction feedback with direct Solscan links for every buy, list, or cancel action.
+- **Multi-Wallet Support** — Compatible with Phantom, Backpack, and Solflare.
+
+## 👛 Supported Wallets
+
+For the best experience on **SolEstate**, we recommend exploring the platform using one of the following wallets:
+
+- **Solflare (Recommended)** — **Most stable.** Provides accurate transaction simulations and seamless execution.
+- **Backpack** — Native support with smooth integration.
+- **Phantom** — Supported, but may occasionally show false-positive simulation warnings during complex interactions. If you see a simulation error in Phantom, ensure your devnet balance is sufficient and proceed.
+
+We highly recommend using **Solflare** for a flawless investment experience.
 
 ## 🛠️ Project Structure
 

@@ -17,8 +17,10 @@ const statusConfig = {
 
 export function PropertyCard({ property, className }: PropertyCardProps) {
   const progress = getFundingProgress(property)
-  const status = statusConfig[property.status]
   const remainingTokens = property.totalTokens - property.soldTokens
+  const status = (property.status === 'active' && remainingTokens <= 0) 
+    ? statusConfig.funded 
+    : statusConfig[property.status]
 
   return (
     <Link

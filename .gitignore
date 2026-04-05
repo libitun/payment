@@ -16,6 +16,8 @@ node_modules
 .DS_Store
 .vercel
 .agents/
+.continue/
+.env
 
 # Rust / Anchor
 target/

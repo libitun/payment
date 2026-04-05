@@ -5,7 +5,7 @@ import fs from 'fs';
 import { properties } from '../lib/properties';
 
 // Инициализация
-const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+const connection = new Connection('https://devnet.helius-rpc.com/?api-key=dc9dbf9a-7a03-420a-bab5-97e89ebf3aec', 'confirmed');
 
 // Загрузка ключа деплоера (Админа)
 const keypairPath = require('os').homedir() + '/.config/solana/id.json';
@@ -17,11 +17,11 @@ const wallet = new anchor.Wallet(adminKeypair);
 const provider = new anchor.AnchorProvider(connection, wallet, { preflightCommitment: 'confirmed' });
 anchor.setProvider(provider);
 
-const PROGRAM_ID = new PublicKey("5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN");
+const PROGRAM_ID = new PublicKey("GRYwL4CWgnV59QtqPaaiH5VZB5hLkJy8GyNd1QpnTp7V");
 
 // Полный IDL, включая функции для админа
 const IDL = {
-  address: "5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN",
+  address: "GRYwL4CWgnV59QtqPaaiH5VZB5hLkJy8GyNd1QpnTp7V",
   metadata: { name: "solestate", version: "0.1.0", spec: "0.1.0" },
   accounts: [
     {

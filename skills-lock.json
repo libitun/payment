@@ -5,6 +5,16 @@
       "source": "ColosseumOrg/colosseum-copilot",
       "sourceType": "github",
       "computedHash": "7859139478a5276c63a6114f0c3f9899ca4a30b5e4239825d16b92e8744e9e07"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "063a0e6448123cd359ad0044cc46b0e490cc7964d45ef4bb9fd842bd2ffbca67"
+    },
+    "solana-dev": {
+      "source": "solana-foundation/solana-dev-skill",
+      "sourceType": "github",
+      "computedHash": "4a4c953b235944cc5c2a76af9669406ee01213bf6892941399e646cfbf9259b9"
     }
   }
 }

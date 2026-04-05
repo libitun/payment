@@ -88,7 +88,7 @@ export default function MarketPage() {
   const { connected, connect, shortAddress } = useWallet()
   const [sortKey, setSortKey] = useState<SortKey>('volume24h')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
-  const [filter, setFilter] = useState<'all' | 'gains' | 'losses'>('all')
+  const [filter, setFilter] = useState<'all' | 'gains' | 'losses' | 'buy' | 'sell'>('all')
   const [buyModal, setBuyModal] = useState<Listing | null>(null)
   const [buyAmount, setBuyAmount] = useState(1)
   const [bought, setBought] = useState<string | null>(null)
@@ -102,6 +102,8 @@ export default function MarketPage() {
     let list = [...MOCK_LISTINGS]
     if (filter === 'gains') list = list.filter((l) => l.change24h > 0)
     if (filter === 'losses') list = list.filter((l) => l.change24h < 0)
+    if (filter === 'buy') list = list.filter((l) => l.type === 'bid')
+    if (filter === 'sell') list = list.filter((l) => l.type === 'ask')
     list.sort((a, b) => {
       const va = a[sortKey]
       const vb = b[sortKey]
@@ -175,7 +177,7 @@ export default function MarketPage() {
           {/* Filter tabs */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-1 glass rounded-xl p-1 border border-border">
-              {(['all', 'gains', 'losses'] as const).map((f) => (
+              {(['all', 'buy', 'sell', 'gains', 'losses'] as const).map((f) => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
@@ -185,7 +187,7 @@ export default function MarketPage() {
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  {f === 'gains' ? 'Gainers' : f === 'losses' ? 'Losers' : 'All'}
+                  {f === 'gains' ? 'Gainers' : f === 'losses' ? 'Losers' : f === 'buy' ? 'Buy' : f === 'sell' ? 'Sell' : 'All'}
                 </button>
               ))}
             </div>

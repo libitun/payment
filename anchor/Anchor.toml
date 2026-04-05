@@ -1,15 +1,14 @@
 [toolchain]
-anchor_version = "0.30.1"
+anchor_version = "1.0.0"
 
 [features]
 resolution = true
 skip-lint = false
 
 [programs.devnet]
-solestate = "5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN"
+solestate = "49yz2fypShXqaGgopGx3vK73ojKdwZnLzydZE2iPBRr7"
 
-[registry]
-url = "https://api.apr.dev"
+
 
 [provider]
 cluster = "Devnet"

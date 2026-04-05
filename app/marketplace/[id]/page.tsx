@@ -1,9 +1,10 @@
 'use client'
 
 import { use, useState, useCallback, useMemo } from 'react'
-import { useWallet } from '@/lib/wallet-context'
+import { useWallet, getSolanaProvider } from '@/lib/wallet-context'
 import Image from 'next/image'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import {
   ArrowLeft,
   MapPin,
@@ -71,7 +72,8 @@ export default function PropertyDetailPage({ params }: PageProps) {
   if (!property) notFound()
 
   const progress = getFundingProgress(property)
-  const status = statusConfig[property.status]
+  const isFullyFunded = property.soldTokens >= property.totalTokens
+  const status = isFullyFunded ? statusConfig.funded : statusConfig[property.status]
 
   const [tokenAmount, setTokenAmount] = useState(1)
   const [purchasing, setPurchasing] = useState(false)
@@ -84,7 +86,7 @@ export default function PropertyDetailPage({ params }: PageProps) {
 
   const { connected, connect, shortAddress, sendPurchaseTx, purchases } = useWallet()
   const [isSellModalOpen, setIsSellModalOpen] = useState(false)
-  
+
   const userHoldings = useMemo(() => {
     return purchases
       .filter(p => p.propertyId === property.id)
@@ -94,11 +96,8 @@ export default function PropertyDetailPage({ params }: PageProps) {
   const related = properties.filter((p) => p.id !== property.id).slice(0, 3)
 
   const handleInvest = useCallback(async () => {
-    if (property.status !== 'active') return
-    if (!connected) {
-      await connect()
-      return
-    }
+    if (property.status !== 'active' || isFullyFunded) return
+    if (!connected) { await connect(); return }
     setPurchasing(true)
     setTxStatus(null)
     try {
@@ -115,9 +114,8 @@ export default function PropertyDetailPage({ params }: PageProps) {
       setTxStatus({ state: 'success', sig })
     } catch (err) {
       const code = (err as { code?: number })?.code
-      // 4001 = user rejected — show friendly message, not an error
       if (code === 4001) {
-        setTxStatus(null)
+        setTxStatus(null) // user cancelled in Phantom
       } else {
         const msg = (err as Error)?.message ?? 'Transaction failed'
         setTxStatus({ state: 'error', msg })
@@ -125,7 +123,7 @@ export default function PropertyDetailPage({ params }: PageProps) {
     } finally {
       setPurchasing(false)
     }
-  }, [connected, connect, sendPurchaseTx, lamports, property.status])
+  }, [connected, connect, sendPurchaseTx, lamports, tokenAmount, property, isFullyFunded])
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -252,41 +250,11 @@ export default function PropertyDetailPage({ params }: PageProps) {
                 </div>
               </div>
 
-              {/* Token info */}
-              <div>
-                <h2 className="text-xl font-semibold text-foreground mb-3">Token Information</h2>
-                <div className="glass rounded-2xl p-6 border-glow space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Token Mint Address</span>
-                    <a
-                      href={`https://solscan.io/token/${property.tokenMint}?cluster=devnet`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 font-mono text-xs text-primary hover:underline"
-                    >
-                      {property.tokenMint.slice(0, 8)}...{property.tokenMint.slice(-6)}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Network</span>
-                    <span className="text-foreground">Solana Devnet</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Token Standard</span>
-                    <span className="text-foreground">SPL Token</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total Supply</span>
-                    <span className="text-foreground">{formatNum(property.totalTokens)} tokens</span>
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* Right: investment panel (sticky) */}
             <div className="lg:col-span-1">
-              <div className="sticky top-20 space-y-4">
+              <div className="space-y-4">
                 {/* Investment card */}
                 <div className="glass rounded-2xl p-6 border-glow">
                   {/* Key metrics */}
@@ -332,7 +300,7 @@ export default function PropertyDetailPage({ params }: PageProps) {
                   </div>
 
                   {/* Token selector */}
-                  {property.status === 'active' && (
+                  {property.status === 'active' && !isFullyFunded && (
                     <div className="mb-6">
                       <label className="text-sm text-muted-foreground block mb-2">
                         Number of tokens
@@ -381,7 +349,7 @@ export default function PropertyDetailPage({ params }: PageProps) {
                   )}
 
                   {/* Invest button */}
-                  {property.status === 'active' ? (
+                  {property.status === 'active' && !isFullyFunded ? (
                     connected ? (
                       <div className="flex gap-2">
                         <button
@@ -430,8 +398,8 @@ export default function PropertyDetailPage({ params }: PageProps) {
                   {txStatus && (
                     <div
                       className={`mt-4 rounded-xl p-4 flex items-start gap-3 border text-sm ${txStatus.state === 'success'
-                          ? 'bg-accent/10 border-accent/30'
-                          : 'bg-destructive/10 border-destructive/30'
+                        ? 'bg-accent/10 border-accent/30'
+                        : 'bg-destructive/10 border-destructive/30'
                         }`}
                     >
                       {txStatus.state === 'success' ? (
@@ -490,9 +458,9 @@ export default function PropertyDetailPage({ params }: PageProps) {
                 </div>
 
                 {/* Quick stats */}
-                <div className="glass rounded-2xl p-5 border-glow">
-                  <h3 className="text-sm font-semibold text-foreground mb-3">Financial Summary</h3>
-                  <div className="space-y-2.5">
+                <div className="glass rounded-2xl p-6 border-glow">
+                  <h3 className="text-sm font-semibold text-foreground mb-4">Financial Summary</h3>
+                  <div className="space-y-3">
                     {[
                       { label: 'Target Raise', value: formatUSD(property.targetRaise) },
                       { label: 'Min. Investment', value: formatSOL(property.minInvestment) },
@@ -504,6 +472,37 @@ export default function PropertyDetailPage({ params }: PageProps) {
                         <span className="text-foreground font-medium">{item.value}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+
+                {/* Token info */}
+                <div className="glass rounded-2xl p-6 border-glow">
+                  <h3 className="text-sm font-semibold text-foreground mb-4">Token Information</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Token Mint</span>
+                      <a
+                        href={`https://solscan.io/token/${property.tokenMint}?cluster=devnet`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 font-mono text-xs text-primary hover:underline"
+                      >
+                        {property.tokenMint.slice(0, 4)}...{property.tokenMint.slice(-4)}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Network</span>
+                      <span className="text-foreground font-medium">Devnet</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Standard</span>
+                      <span className="text-foreground font-medium">SPL</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Total Supply</span>
+                      <span className="text-foreground font-medium">{formatNum(property.totalTokens)}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -535,10 +534,32 @@ export default function PropertyDetailPage({ params }: PageProps) {
         }}
         maxTokens={userHoldings}
         onSell={async (amt, prc) => {
-          const wallet = (window as any).phantom?.solana
+          const wallet = getSolanaProvider()
+          if (!wallet) throw new Error('Wallet not connected')
           const priceLamports = Math.floor(prc * 1e9)
-          await createSaleListing(wallet, property.id, amt, priceLamports)
-          alert('Successfully listed for sale!')
+          try {
+            const sig = await createSaleListing(wallet, property.id, amt, priceLamports)
+            toast.success('Successfully listed for sale!', {
+              description: (
+                <div className="flex flex-col gap-2">
+                  <span>{amt} tokens listed at {prc} SOL each. View in Portfolio &gt; Active Listings</span>
+                  <a 
+                    href={`https://solscan.io/tx/${sig}?cluster=devnet`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-xs text-primary hover:underline flex items-center gap-1"
+                  >
+                    View on Explorer <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )
+            })
+          } catch (e: any) {
+            toast.error('Failed to create listing', {
+              description: e.message
+            })
+            throw e
+          }
         }}
       />
     </div>

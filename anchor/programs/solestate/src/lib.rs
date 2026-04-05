@@ -1,8 +1,12 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer};
-use anchor_spl::metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3, Metadata, mpl_token_metadata::types::DataV2};
+use anchor_spl::metadata::{
+    create_metadata_accounts_v3, CreateMetadataAccountsV3,
+    update_metadata_accounts_v2, UpdateMetadataAccountsV2,
+    Metadata, mpl_token_metadata::types::DataV2,
+};
 
-declare_id!("5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN");
+declare_id!("49yz2fypShXqaGgopGx3vK73ojKdwZnLzydZE2iPBRr7");
 
 // ── Platform constants (outside program module) ──────────────────────────
 // 2% platform fee on all P2P secondary market sales
@@ -133,7 +137,7 @@ pub mod solestate {
 
         token::mint_to(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 MintTo {
                     mint: ctx.accounts.token_mint.to_account_info(),
                     to: ctx.accounts.investor_token_account.to_account_info(),
@@ -177,6 +181,107 @@ pub mod solestate {
             ctx.accounts.investor.key(),
         );
 
+        Ok(())
+    }
+
+    /// Purchase tokens and create a permanent on-chain purchase record.
+    pub fn purchase_tokens_with_history(
+        ctx: Context<PurchaseTokensWithHistory>,
+        property_id: String,
+        token_amount: u64,
+        timestamp: i64,
+    ) -> Result<()> {
+        // 1. Perform standard purchase validation
+        require!(ctx.accounts.property.is_active, SolEstateError::PropertyNotActive);
+        require!(token_amount > 0, SolEstateError::InvalidTokenCount);
+        require!(
+            ctx.accounts.property.sold_tokens + token_amount <= ctx.accounts.property.total_tokens,
+            SolEstateError::InsufficientTokensAvailable
+        );
+
+        let cost_lamports = ctx.accounts.property
+            .price_per_token_lamports
+            .checked_mul(token_amount)
+            .ok_or(SolEstateError::ArithmeticOverflow)?;
+
+        // Transfer SOL: buyer → property vault
+        let ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.buyer.key(),
+            &ctx.accounts.property_vault.key(),
+            cost_lamports,
+        );
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[
+                ctx.accounts.buyer.to_account_info(),
+                ctx.accounts.property_vault.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+        )?;
+
+        // Mint tokens to buyer
+        let registry_key = ctx.accounts.registry.key();
+        let prop_id = ctx.accounts.property.id.clone();
+        let property_bump = ctx.accounts.property.bump;
+        let seeds = &[
+            b"property",
+            registry_key.as_ref(),
+            prop_id.as_bytes(),
+            &[property_bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                MintTo {
+                    mint: ctx.accounts.token_mint.to_account_info(),
+                    to: ctx.accounts.buyer_token_account.to_account_info(),
+                    authority: ctx.accounts.property.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            token_amount.checked_mul(1_000_000).ok_or(SolEstateError::ArithmeticOverflow)?,
+        )?;
+
+        // Update state
+        let property = &mut ctx.accounts.property;
+        property.sold_tokens += token_amount;
+        property.total_raised_lamports += cost_lamports;
+        property.investor_count += 1;
+        if property.sold_tokens == property.total_tokens {
+            property.is_active = false;
+        }
+
+        ctx.accounts.registry.total_raised_lamports += cost_lamports;
+
+        // 2. Initialize PurchaseRecord PDA
+        let record = &mut ctx.accounts.purchase_record;
+        record.buyer           = ctx.accounts.buyer.key();
+        record.property        = ctx.accounts.property.key();
+        record.property_id     = property_id;
+        record.token_mint      = ctx.accounts.token_mint.key();
+        record.token_amount    = token_amount;
+        record.price_per_token = ctx.accounts.property.price_per_token_lamports;
+        record.total_price     = cost_lamports;
+        record.timestamp       = timestamp;
+        record.annual_yield    = ctx.accounts.property.annual_yield_bps;
+
+        emit!(TokensPurchased {
+            property_id: ctx.accounts.property.id.clone(),
+            investor: ctx.accounts.buyer.key(),
+            token_amount,
+            cost_lamports,
+            timestamp,
+        });
+
+        msg!("Purchased {} tokens with history. Record PDA: {}", token_amount, record.key());
+        Ok(())
+    }
+
+    /// Reclaim rent from an old purchase record.
+    pub fn close_purchase_record(_ctx: Context<ClosePurchaseRecord>) -> Result<()> {
+        msg!("Purchase record closed");
         Ok(())
     }
 
@@ -224,7 +329,7 @@ pub mod solestate {
         // Lock tokens into listing escrow
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.seller_token_account.to_account_info(),
                     to: ctx.accounts.listing_escrow.to_account_info(),
@@ -290,7 +395,7 @@ pub mod solestate {
 
         token::transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.listing_escrow.to_account_info(),
                     to: ctx.accounts.buyer_token_account.to_account_info(),
@@ -334,7 +439,7 @@ pub mod solestate {
 
         token::transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.listing_escrow.to_account_info(),
                     to: ctx.accounts.seller_token_account.to_account_info(),
@@ -379,7 +484,7 @@ pub mod solestate {
 
         create_metadata_accounts_v3(
             CpiContext::new_with_signer(
-                ctx.accounts.token_metadata_program.to_account_info(),
+                ctx.accounts.token_metadata_program.key(),
                 CreateMetadataAccountsV3 {
                     metadata: ctx.accounts.metadata_account.to_account_info(),
                     mint: ctx.accounts.token_mint.to_account_info(),
@@ -406,6 +511,52 @@ pub mod solestate {
         )?;
 
         msg!("Metadata created for {}", ctx.accounts.property.id);
+        Ok(())
+    }
+
+    // ─── 8b. Update Metaplex Metadata (name / symbol / uri) ──────────────────
+    pub fn update_property_metadata(
+        ctx: Context<UpdatePropertyMetadata>,
+        name: String,
+        symbol: String,
+        uri: String,
+    ) -> Result<()> {
+        let registry_key  = ctx.accounts.registry.key();
+        let property_id   = ctx.accounts.property.id.clone();
+        let property_bump = ctx.accounts.property.bump;
+
+        let seeds = &[
+            b"property",
+            registry_key.as_ref(),
+            property_id.as_bytes(),
+            &[property_bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        update_metadata_accounts_v2(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_metadata_program.key(),
+                UpdateMetadataAccountsV2 {
+                    metadata: ctx.accounts.metadata_account.to_account_info(),
+                    update_authority: ctx.accounts.property.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            None,               // new_update_authority
+            Some(DataV2 {
+                name,
+                symbol,
+                uri,
+                seller_fee_basis_points: 0,
+                creators: None,
+                collection: None,
+                uses: None,
+            }),
+            None,               // primary_sale_happened
+            Some(true),         // is_mutable
+        )?;
+
+        msg!("Metadata updated for {}", ctx.accounts.property.id);
         Ok(())
     }
 
@@ -441,7 +592,7 @@ pub mod solestate {
         // Transfer tokens from investor ATA → lockup vault PDA
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.investor_token_account.to_account_info(),
                     to: ctx.accounts.lockup_vault.to_account_info(),
@@ -486,7 +637,7 @@ pub mod solestate {
         // Transfer tokens from vault → investor
         token::transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.lockup_vault.to_account_info(),
                     to: ctx.accounts.investor_token_account.to_account_info(),
@@ -512,6 +663,7 @@ pub mod solestate {
 
         let listing = &mut ctx.accounts.sale_listing;
         let clock = Clock::get()?;
+
         listing.seller                  = ctx.accounts.seller.key();
         listing.property                = ctx.accounts.property.key();
         listing.token_mint              = ctx.accounts.token_mint.key();
@@ -524,7 +676,7 @@ pub mod solestate {
         // Transfer tokens from seller → escrow vault
         token::transfer(
             CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.seller_token_account.to_account_info(),
                     to: ctx.accounts.listing_vault.to_account_info(),
@@ -540,8 +692,7 @@ pub mod solestate {
 
     // ─── 13. Cancel P2P sale listing ──────────────────────────────────────────
     pub fn cancel_sale_listing(ctx: Context<CancelSaleListing>) -> Result<()> {
-        let listing = &mut ctx.accounts.sale_listing;
-        require!(listing.is_active, SolEstateError::ListingNotActive);
+        let listing = &ctx.accounts.sale_listing;
         require!(listing.seller == ctx.accounts.seller.key(), SolEstateError::Unauthorized);
 
         let seller_key  = listing.seller;
@@ -550,7 +701,12 @@ pub mod solestate {
         let amount      = listing.token_amount;
         let bump        = listing.bump;
 
-        listing.is_active = false;
+        // Account will be closed automatically via 'close = seller' constraint in the context
+
+        let clock = Clock::get()?;
+        let cooldown = &mut ctx.accounts.cooldown;
+        cooldown.last_cancel_time = clock.unix_timestamp;
+        cooldown.bump = ctx.bumps.cooldown;
 
         let seeds = &[
             b"sale_listing",
@@ -564,7 +720,7 @@ pub mod solestate {
         // Return tokens to seller
         token::transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.listing_vault.to_account_info(),
                     to: ctx.accounts.seller_token_account.to_account_info(),
@@ -575,6 +731,19 @@ pub mod solestate {
             amount * 1_000_000,
         )?;
 
+        // Close the vault account and return rent to the seller
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                anchor_spl::token::CloseAccount {
+                    account: ctx.accounts.listing_vault.to_account_info(),
+                    destination: ctx.accounts.seller.to_account_info(),
+                    authority: ctx.accounts.sale_listing.to_account_info(),
+                },
+                signer_seeds,
+            )
+        )?;
+
         msg!("Listing cancelled, {} tokens returned to seller", amount);
         Ok(())
     }
@@ -582,7 +751,7 @@ pub mod solestate {
     // ─── 14. Execute P2P sale (buyer purchases from listing) ──────────────────
     pub fn execute_sale(ctx: Context<ExecuteSale>) -> Result<()> {
         let listing = &ctx.accounts.sale_listing;
-        require!(listing.is_active, SolEstateError::ListingNotActive);
+        // require!(listing.is_active, SolEstateError::ListingNotActive); // Removed for atomic closure
 
         let total_cost = listing.price_per_token_lamports
             .checked_mul(listing.token_amount)
@@ -601,10 +770,6 @@ pub mod solestate {
         let mint_key    = listing.token_mint;
         let amount      = listing.token_amount;
         let bump        = listing.bump;
-
-        // Mark listing as inactive
-        let listing_mut = &mut ctx.accounts.sale_listing;
-        listing_mut.is_active = false;
 
         // Transfer SOL: buyer → seller (minus fee)
         anchor_lang::solana_program::program::invoke(
@@ -647,7 +812,7 @@ pub mod solestate {
         // Transfer tokens: vault → buyer
         token::transfer(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 Transfer {
                     from: ctx.accounts.listing_vault.to_account_info(),
                     to: ctx.accounts.buyer_token_account.to_account_info(),
@@ -656,6 +821,19 @@ pub mod solestate {
                 signer_seeds,
             ),
             amount * 1_000_000,
+        )?;
+
+        // Close the vault account and return rent to the seller
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                anchor_spl::token::CloseAccount {
+                    account: ctx.accounts.listing_vault.to_account_info(),
+                    destination: ctx.accounts.seller.to_account_info(),
+                    authority: ctx.accounts.sale_listing.to_account_info(),
+                },
+                signer_seeds,
+            )
         )?;
 
         msg!(
@@ -705,6 +883,23 @@ impl PropertyState {
         + 32 + 32                 // admin + mint
         + 8 + 8 + 8               // tokens x2 + price
         + 2 + 1 + 8 + 4 + 8 + 1; // yield, active, raised, investors, ts, bump
+}
+
+#[account]
+pub struct PurchaseRecord {
+    pub buyer: Pubkey,            // 32
+    pub property: Pubkey,         // 32
+    pub property_id: String,      // 4 + 32
+    pub token_mint: Pubkey,       // 32
+    pub token_amount: u64,        // 8
+    pub price_per_token: u64,     // 8
+    pub total_price: u64,         // 8
+    pub timestamp: i64,           // 8
+    pub annual_yield: u16,        // 2
+}
+
+impl PurchaseRecord {
+    pub const LEN: usize = 8 + 32 + 32 + (4 + 32) + 32 + 8 + 8 + 8 + 8 + 2;
 }
 
 #[account]
@@ -855,6 +1050,65 @@ pub struct PurchaseTokens<'info> {
     pub investor: Signer<'info>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(property_id: String, token_amount: u64, timestamp: i64)]
+pub struct PurchaseTokensWithHistory<'info> {
+    #[account(
+        init,
+        payer = buyer,
+        space = PurchaseRecord::LEN,
+        seeds = [b"purchase_record", buyer.key().as_ref(), property.key().as_ref(), &timestamp.to_le_bytes()],
+        bump
+    )]
+    pub purchase_record: Box<Account<'info, PurchaseRecord>>,
+
+    #[account(
+        mut,
+        seeds = [b"property", registry.key().as_ref(), property.id.as_bytes()],
+        bump = property.bump
+    )]
+    pub property: Box<Account<'info, PropertyState>>,
+
+    #[account(mut, constraint = token_mint.key() == property.token_mint)]
+    pub token_mint: Box<Account<'info, Mint>>,
+
+    #[account(
+        init_if_needed,
+        payer = buyer,
+        associated_token::mint = token_mint,
+        associated_token::authority = buyer,
+    )]
+    pub buyer_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut, seeds = [b"vault", property.key().as_ref()], bump)]
+    /// CHECK: PDA vault
+    pub property_vault: UncheckedAccount<'info>,
+
+    #[account(mut, seeds = [b"registry"], bump = registry.bump)]
+    pub registry: Box<Account<'info, PropertyRegistry>>,
+
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct ClosePurchaseRecord<'info> {
+    #[account(
+        mut, 
+        close = buyer, 
+        constraint = purchase_record.buyer == buyer.key() @ SolEstateError::Unauthorized
+    )]
+    pub purchase_record: Account<'info, PurchaseRecord>,
+    #[account(mut)]
+    pub buyer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -1090,6 +1344,40 @@ pub struct CreatePropertyMetadata<'info> {
 }
 
 #[derive(Accounts)]
+pub struct UpdatePropertyMetadata<'info> {
+    #[account(
+        seeds = [b"property", registry.key().as_ref(), property.id.as_bytes()],
+        bump = property.bump
+    )]
+    pub property: Box<Account<'info, PropertyState>>,
+
+    /// CHECK: Metaplex Metadata PDA — will be mutated via CPI
+    #[account(
+        mut,
+        seeds = [
+            b"metadata",
+            token_metadata_program.key().as_ref(),
+            token_mint.key().as_ref()
+        ],
+        seeds::program = token_metadata_program.key(),
+        bump,
+    )]
+    pub metadata_account: UncheckedAccount<'info>,
+
+    #[account(constraint = token_mint.key() == property.token_mint)]
+    pub token_mint: Box<Account<'info, Mint>>,
+
+    #[account(seeds = [b"registry"], bump = registry.bump)]
+    pub registry: Box<Account<'info, PropertyRegistry>>,
+
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    pub token_metadata_program: Program<'info, Metadata>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct InitializeTreasury<'info> {
     #[account(
         init,
@@ -1189,7 +1477,7 @@ pub struct CreateSaleListing<'info> {
 
     /// Token escrow vault owned by the sale_listing PDA
     #[account(
-        init,
+        init_if_needed,
         payer = seller,
         token::mint = token_mint,
         token::authority = sale_listing,
@@ -1213,12 +1501,21 @@ pub struct CreateSaleListing<'info> {
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+
+    /// CHECK: Read-only — we manually inspect the cooldown timestamp if initialized.
+    /// PDA seeds are verified via the constraint below.
+    #[account(
+        seeds = [b"cooldown", seller.key().as_ref(), property.key().as_ref()],
+        bump
+    )]
+    pub cooldown: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
 pub struct CancelSaleListing<'info> {
     #[account(
         mut,
+        close = seller,
         seeds = [b"sale_listing", seller.key().as_ref(), property.key().as_ref(), token_mint.key().as_ref()],
         bump = sale_listing.bump
     )]
@@ -1245,12 +1542,22 @@ pub struct CancelSaleListing<'info> {
     pub seller: Signer<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+
+    #[account(
+        init_if_needed,
+        payer = seller,
+        space = ListingCooldown::LEN,
+        seeds = [b"cooldown", seller.key().as_ref(), property.key().as_ref()],
+        bump
+    )]
+    pub cooldown: Box<Account<'info, ListingCooldown>>,
 }
 
 #[derive(Accounts)]
 pub struct ExecuteSale<'info> {
     #[account(
         mut,
+        close = seller,
         seeds = [b"sale_listing", seller.key().as_ref(), property.key().as_ref(), token_mint.key().as_ref()],
         bump = sale_listing.bump
     )]
@@ -1315,4 +1622,16 @@ pub enum SolEstateError {
     LockDurationTooShort,
     #[msg("Lockup period has not expired yet")]
     LockupNotExpired,
+    #[msg("You must wait 24 hours after cancelling a listing before relisting")]
+    CooldownActive,
+}
+
+#[account]
+pub struct ListingCooldown {
+    pub last_cancel_time: i64,
+    pub bump: u8,
+}
+
+impl ListingCooldown {
+    pub const LEN: usize = 8 + 8 + 1;
 }

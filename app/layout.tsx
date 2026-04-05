@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { WalletProvider } from '@/lib/wallet-context'
+import { Toaster } from 'sonner'
 import './globals.css'
 
 const inter = Inter({
@@ -43,10 +44,16 @@ export default function RootLayout({
   return (
     <html lang="en" data-scroll-behavior="smooth" className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <body className="font-sans antialiased bg-background text-foreground" suppressHydrationWarning>
-        <WalletProvider>
-          {children}
-        </WalletProvider>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {/* suppressHydrationWarning on this div prevents false hydration errors
+            caused by browser extensions (e.g. Bitdefender) that add attributes like
+            bis_skin_checked="1" to DOM elements before React hydrates. */}
+        <div suppressHydrationWarning>
+          <WalletProvider>
+            {children}
+          </WalletProvider>
+          <Toaster position="top-right" theme="dark" richColors />
+          {process.env.NODE_ENV === 'production' && <Analytics />}
+        </div>
       </body>
     </html>
   )
