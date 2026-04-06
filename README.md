@@ -8,7 +8,7 @@
 
 ---
 
-## [Live Demo](https://payment-z9.vercel.app/) · [Demo Video](https://youtu.be/example) · [Docs](https://github.com/libitun/payment/blob/main/README.md) · [Solana Explorer](https://solscan.io/account/5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN?cluster=devnet)
+## [Live Demo](https://payment-two-sable.vercel.app/) · [Demo Video](https://www.youtube.com/watch?v=jl-l4ZaN1wo) · [Speech Video](https://www.youtube.com/watch?v=ANjzfufGyf8) · [Docs](https://github.com/libitun/payment/blob/main/README.md) · [Solana Explorer](https://solscan.io/account/5tPSqDkPUP5sA56K25R2jN2sUrW57mf5m1b6QTPdRzYN?cluster=devnet)
 
 ## 🚀 Key Features
 
